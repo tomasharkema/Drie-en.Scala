@@ -1,0 +1,48 @@
+@import _root_.game.Game
+@import _root_.game.ThrowCardFromOpenTable
+@import play.api.libs.json.Json
+@import _root_.helpers.JsonHelpers
+
+@(game: Game)
+
+@main("Drieën") {
+
+  <h1>Drieën: @game.isInState</h1>
+  <div id="game">
+
+    <h2>Tafel: @game.table.map(_.string)</h2>
+    <h2>Pot: @game.deck.cards.size kaarten</h2>
+
+    <table style="width: 100%"><tr>
+    @game.players.map { player =>
+      <td>
+      <h1>@player.id @if(player.turn) { : Aan zet }</h1>
+      <p>Hand Kaarten:</p>
+      <ul>
+      @player.handCards.sortWith((a, b) => a.rank.rank < b.rank.rank).map { card =>
+        <li>
+        @card.string @if(player.turn) {
+          @game.validMovesForState.map { move =>
+            <a href="@routes.GameController.commitMove(Some(true), game.id, player.id, move.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">DOE @move.value</a>
+          }
+        }
+        </li>
+      }
+      </ul>
+      @game.validMovesForState.map { move =>
+        @*<a href="@routes.GameController.commitMove(Some(true), game.id, player.id, move.value, JsonHelpers.objToString(Json.arr(Json.obj("suit" -> player.handCards.head.suit.string, "rank" -> player.handCards.head.rank.abbr), Json.obj("suit" -> player.handCards(1).suit.string, "rank" -> player.handCards(1).rank.abbr))))">*@
+          @*1,2</a>*@
+      }
+
+      <p>Open Tafel Kaarten:</p>
+      <ul>
+      @player.openedTableCards.map { card =>
+        <li>@card.string @if(player.turn) { <a href="@routes.GameController.commitMove(Some(true), game.id, player.id, ThrowCardFromOpenTable.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">Gooi</a> }</li>
+      }
+      </ul>
+      </td>
+    }
+    </tr></table>
+  </div>
+
+}
