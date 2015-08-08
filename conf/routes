@@ -6,7 +6,7 @@
 GET        /                       controllers.Application.index
 
 GET        /game/id/:gameId        controllers.GameController.game(gameId)
-GET        /game/newGame           controllers.GameController.newGame
+GET        /game/newGame           controllers.GameController.newGame(redirect: Option[Boolean])
 GET        /game/gameState         controllers.GameController.gameState(id)
 GET        /game/commitMove        controllers.GameController.commitMove(redirect: Option[Boolean], gameId, playerId, move, kv)
 

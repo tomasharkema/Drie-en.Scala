@@ -36,11 +36,15 @@ object GameController extends Controller {
     }
   }
 
-  def newGame = Action {
+  def newGame(redirect: Option[Boolean]) = Action {
     val id = java.util.UUID.randomUUID.toString
     val game = Game.newGame(id)
     Cache.set("gameuid:" + id, game)
-    Ok(Json.toJson(game))
+
+    redirect match {
+      case Some(true) => Redirect(routes.GameController.game(game.id))
+      case _ => Ok(Json.toJson(game))
+    }
   }
 
   def gameState(gameId: String) = Action.async {
