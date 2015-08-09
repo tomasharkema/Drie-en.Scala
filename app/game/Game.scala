@@ -15,16 +15,27 @@ case class Player(id: String,
                   turn: Boolean,
                   closedTableCards: Seq[Card],
                   openedTableCards: Seq[Card],
-                  handCards: Seq[Card])
+                  handCards: Seq[Card]) {
+
+  def canThrowClosedCard = closedTableCards.nonEmpty && openedTableCards.isEmpty && handCards.isEmpty
+
+  def isEqual(otherPlayer: Player): Boolean = {
+    id == otherPlayer.id
+  }
+
+  def canDoAnotherTurn: Boolean = {
+    !(closedTableCards.isEmpty && openedTableCards.isEmpty && handCards.isEmpty)
+  }
+}
 
 object Player {
 
   def newPlayer(id: String, deck: Deck): Player = {
     Player(id,
       false,
-      Seq(),//Seq(deck.draw().get, deck.draw().get, deck.draw().get),
       Seq(),
-      Seq())//Seq(deck.draw().get, deck.draw().get, deck.draw().get, deck.draw().get, deck.draw().get, deck.draw().get))
+      Seq(),
+      Seq())
   }
 
   implicit val writesPlayer: Writes[Player] = new Writes[Player] {
@@ -123,10 +134,10 @@ case object FirstMover extends GameState("FirstMover", { game =>
   game.players.map(_.handCards).count(_ == 3) == game.players.size
 }, Set(ThrowOnTable), Set(Starting))
 case object NormalThrowing extends GameState("NormalThrowing", { game =>
-  //!game.players.map(_.handCards.size).contains(0) &&
-    !game.players.map(_.openedTableCards.size).contains(0) &&
-    !game.players.map(_.closedTableCards.size).contains(0)
-}, Set(ThrowOnTable, GrabFromTable, ThrowCardFromOpenTable), Set(FirstMover))
+  game.players.count(_.canDoAnotherTurn) == 2
+}, Set(ThrowOnTable, GrabFromTable, ThrowCardFromOpenTable, ThrowCardFromClosedTable), Set(FirstMover))
+
+// for winnerstate: http://localhost:5555/game/id/a7647ee1-f5f1-4759-9a62-5a6196629147
 
 object GameState {
   val States = Seq(Starting, FirstMover, NormalThrowing)
@@ -169,11 +180,11 @@ case class Game(id: String,
     val validStates = GameState.States
       .filter(_.isInState(this))
       .filter(!passedState.contains(_))
-
-    validStates.head
+/// TODO: Finalizing state
+    validStates.headOption.getOrElse(NormalThrowing)
   }
 
-  def validMovesForState = {
+  def validMovesForState: Set[MoveType] = {
     isInState.moves
   }
 
@@ -199,12 +210,19 @@ case class Game(id: String,
     }
   }
 
-  def nextPlayer: Game = {
-    val playerOnTurn = players.find(_.turn).get
-    val playerOnTurnIndex = players.indexOf(playerOnTurn)
-    val newPlayerOnTurnIndex = if ((playerOnTurnIndex + 1) == players.size) 0 else playerOnTurnIndex + 1
+  private def getNextPlayer(players: Seq[Player], fromPlayer: Seq[Player]): Player = {
+    val playerNowIndex = players.indexOf(fromPlayer)
+    val nextPlayerIndex = if ((playerNowIndex + 1) == players.size) 0 else playerNowIndex + 1
+    players(nextPlayerIndex)
+  }
 
-    val newPlayers = players.map { player =>
+  def nextPlayer: Game = {
+    val playersWithoutWinners = players.filter(p => p.canDoAnotherTurn || p.turn)
+    val playerOnTurn = playersWithoutWinners.find(_.turn).get
+    val playerOnTurnIndex = playersWithoutWinners.indexOf(playerOnTurn)
+    val newPlayerOnTurnIndex = if ((playerOnTurnIndex + 1) == playersWithoutWinners.size) 0 else playerOnTurnIndex + 1
+
+    val newPlayersWithoutWinners = playersWithoutWinners.map { player =>
       val index = players.indexOf(player)
 
       if (index == playerOnTurnIndex) {
@@ -215,6 +233,8 @@ case class Game(id: String,
         player
       }
     }
+
+    val newPlayers = Seq(newPlayersWithoutWinners, players.filter(p => !(p.canDoAnotherTurn || p.turn))).flatten
 
     this.copy(players = newPlayers)
   }
@@ -242,8 +262,10 @@ case class Game(id: String,
             case Some(card) =>
               if (card.rank.rankType == WillThrowAwayAllCards)
                 (Seq(game.truncated, game.table).flatten, Seq())
-              else
-                (game.truncated, game.table)
+              else // trucate with 4 same cards in sequence
+                if (game.table.size >= 4 && game.table.splitAt(4)._1.count(_.rank.rank == game.table.head.rank.rank) == 4)
+                  (Seq(game.truncated, game.table).flatten, Seq())
+                else (game.truncated, game.table)
             case _ =>
               (game.truncated, game.table)
           }

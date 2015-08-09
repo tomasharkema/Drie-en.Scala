@@ -9,7 +9,7 @@ import play.api.libs.json.{JsObject, JsArray, JsValue}
 
 sealed abstract class Move
 case class ThrowOnTableMove(cards: Seq[Card]) extends Move
-case class GrabMove(card: Card) extends Move
+case class ThrowCardFromClosedTableMove(card: Int) extends Move
 case class ThrowToOwnClosedMove(card: Card) extends Move
 case class GrabFromTableMove() extends Move
 case class ThrowCardFromOpenTableMove(cards: Seq[Card]) extends Move
@@ -18,7 +18,7 @@ object Move {
   def moveType(move:Move): MoveType= {
     move match {
       case ThrowOnTableMove(_) => ThrowOnTable
-      case GrabMove(_) => Grab
+      case ThrowCardFromClosedTableMove(_) => ThrowCardFromClosedTable
       case ThrowToOwnClosedMove(_) => ThrowToOwnClosed
       case GrabFromTableMove() => GrabFromTable
       case ThrowCardFromOpenTableMove(_) => ThrowCardFromOpenTable
@@ -33,10 +33,10 @@ sealed abstract class MoveType(val value: String, val commitMoveOnGame: (Game, M
 object ThrowCardFromOpenTable extends MoveType("ThrowCardFromOpenTable", {(game, move, player) =>
   val correctMove = move.asInstanceOf[ThrowCardFromOpenTableMove]
 
-  if (player.handCards.isEmpty) {
+  if (player.handCards.isEmpty && game.canThrowOnTable(correctMove.cards)) {
 
     val players = game.players.map { p =>
-      if (p == player) {
+      if (p.isEqual(player)) {
         val newTableOpenCards = player.openedTableCards.diff(correctMove.cards)
 
         (player.copy(openedTableCards = newTableOpenCards), !correctMove.cards.map(player.openedTableCards.contains(_)).exists(!_))
@@ -65,13 +65,13 @@ object ThrowCardFromOpenTable extends MoveType("ThrowCardFromOpenTable", {(game,
 object ThrowOnTable extends MoveType("ThrowOnTable", { (game, move, player) =>
   val correctMove = move.asInstanceOf[ThrowOnTableMove]
 
-  val (newDeck, drawnCard) = game.deck.draw()
+  val (newDeck, drawnCards) = game.deck.drawCards(correctMove.cards.size)
 
   val players = game.players.map { p =>
-    if (p == player) {
+    if (p.isEqual(player)) {
       val newHandCards = Seq(player.handCards.diff(correctMove.cards),
-        if (drawnCard.isDefined && (player.handCards.size - correctMove.cards.size) < 3)
-          Seq(drawnCard.get)
+        if (drawnCards.nonEmpty && (player.handCards.size - correctMove.cards.size) < 3)
+          drawnCards
         else
           Seq()
       ).flatten
@@ -85,9 +85,9 @@ object ThrowOnTable extends MoveType("ThrowOnTable", { (game, move, player) =>
   val newTableCards = Seq(correctMove.cards, game.table).flatten
 
   if (players.map(_._2).count(b => !b) == 0)
-    if (game.canThrowOnTable(correctMove.cards))
-      (Some(game.copy(deck = newDeck, table = newTableCards, players = players.map(_._1))), true)//correctMove.cards.head.rank.rankType != WillThrowAwayAllCards)
-    else
+    if (game.canThrowOnTable(correctMove.cards)) {
+      (Some(game.copy(deck = newDeck, table = newTableCards, players = players.map(_._1))), !players.map(_._1).find(_.isEqual(player)).get.handCards.exists(_.rank.rank == correctMove.cards.head.rank.rank)) //correctMove.cards.head.rank.rankType != WillThrowAwayAllCards)
+    } else
       (None, true)
   else
     (None, true)
@@ -107,17 +107,29 @@ object ThrowOnTable extends MoveType("ThrowOnTable", { (game, move, player) =>
   }
 }
 
-object Grab extends MoveType("Grab", (game, move, player) => (None, false)) {
-  def fromKV(kv: JsValue): Option[GrabMove] = Card.fromKV(kv) match {
-    case Some(card) => Some(GrabMove(card))
-    case _ => None
-  }
+object ThrowCardFromClosedTable extends MoveType("ThrowCardFromClosedTable", { (game, move, player) =>
+  val correctMove = move.asInstanceOf[ThrowCardFromClosedTableMove]
+
+  if (player.canThrowClosedCard) {
+    val card = player.closedTableCards(correctMove.card)
+
+    val players = game.players.map { p =>
+      if (p.isEqual(player)) {
+        p.copy(closedTableCards = p.closedTableCards.filter(!_.isEqual(card)))
+      } else p
+    }
+
+    if (game.canThrowOnTable(Seq(card))) (Some(game.copy(table = Seq(Seq(card), game.table).flatten, players = players)), true)
+    else GrabFromTable.commitMoveOnGame(game.copy(table = Seq(Seq(card), game.table).flatten, players = players), GrabFromTableMove(), player)
+  } else (None, false)
+}) {
+  def fromKV(kv: JsValue): Option[ThrowCardFromClosedTableMove] = (kv \ "card").asOpt[Int].map(ThrowCardFromClosedTableMove(_))
 }
 
 object ThrowToOwnClosed extends MoveType("ThrowToOwnClosed", {(game, move, player) =>
   val correctMove = move.asInstanceOf[ThrowToOwnClosedMove]
   val players = game.players.map { p =>
-    if (p == player) {
+    if (p.isEqual(player)) {
       val newOpenTableCards = Seq(player.openedTableCards, Seq(correctMove.card)).flatten
       val newHandCards = player.handCards.filter(_ != correctMove.card)
 
@@ -138,19 +150,16 @@ object ThrowToOwnClosed extends MoveType("ThrowToOwnClosed", {(game, move, playe
   }
 }
 
-object GrabFromTable extends MoveType("GrabFromTable", {(game, move, player) =>
+object GrabFromTable extends MoveType("GrabFromTable", {(game, _, player) =>
   val players = game.players.map { p =>
-    if (p == player) {
+    if (p.isEqual(player)) {
       p.copy(handCards = Seq(p.handCards, game.table).flatten)
     } else p
   }
 
   (Some(game.copy(players = players, table = Seq())), true)
 }) {
-  def fromKV(kv: JsValue): Option[GrabFromTableMove] = Card.fromKV(kv) match {
-    case Some(card) => Some(GrabFromTableMove())
-    case _ => None
-  }
+  def fromKV(kv: JsValue): Option[GrabFromTableMove] = Some(GrabFromTableMove())
 }
 
 object MoveType {
@@ -160,7 +169,7 @@ object MoveType {
   def fromString(str: String): Option[(JsValue) => Option[Move]] = {
     str match {
       case "ThrowOnTable" => Some((kv: JsValue) => ThrowOnTable.fromKV(kv))
-      case "Grab" => Some((kv: JsValue) => Grab.fromKV(kv))
+      case "ThrowCardFromClosedTable" => Some((kv: JsValue) => ThrowCardFromClosedTable.fromKV(kv))
       case "ThrowToOwnClosed" => Some((kv: JsValue) => ThrowToOwnClosed.fromKV(kv))
       case "GrabFromTable" => Some((kv: JsValue) => GrabFromTable.fromKV(kv))
       case "ThrowCardFromOpenTable" => Some((kv: JsValue) => ThrowCardFromOpenTable.fromKV(kv))
