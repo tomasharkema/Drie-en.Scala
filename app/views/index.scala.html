@@ -1,9 +1,22 @@
-@(message: String)
+@import _root_.user.User
+@import _root_.game.Game
+
+@(user: User, games: Seq[(Game, Seq[User])])
 
 @main("Drieën") {
 
-    <h1>Drieën</h1>
-    <a href="@routes.GameController.newGame(Some(true))">New Game</a>
-    <div id="game"></div>
+  <h1>Drieën</h1>
+  <h2>Welkom @user.name</h2>
+  <a href="@routes.GameController.addNewGame()">New Game</a>
+  @*<a href="@routes.GameController.newGame(Some(true))">New Game</a>*@
+  <div id="games">
+    <ul>
+    @games.map { gameAndUsers =>
+      <li><a href="@routes.GameController.game(gameAndUsers._1.id)">@gameAndUsers._1.id @gameAndUsers._2.map { user =>
+        @user.name,
+      }</a></li>
+    }
+    </ul>
+  </div>
 
 }

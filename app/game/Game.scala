@@ -3,6 +3,7 @@ package game
 import org.joda.time.DateTime
 import play.api.cache.Cache
 import reactivemongo.bson._
+import user.User
 
 import scala.concurrent.Future
 import util.Random.shuffle
@@ -30,7 +31,7 @@ case class Player(id: String,
 
 object Player {
 
-  def newPlayer(id: String, deck: Deck): Player = {
+  def newPlayer(id: String): Player = {
     Player(id,
       false,
       Seq(),
@@ -158,10 +159,10 @@ object GameState {
 case class Game(id: String,
                 deck: Deck,
                 players: Seq[Player],
-                table: Seq[Card],
-                truncated: Seq[Card],
-                lastUpdated: DateTime,
-                passedState: Set[GameState]) {
+                table: Seq[Card] = Seq(),
+                truncated: Seq[Card] = Seq(),
+                lastUpdated: DateTime = DateTime.now(),
+                passedState: Set[GameState] = Set()) {
 
   def draw: Game = {
 
@@ -170,7 +171,7 @@ case class Game(id: String,
     val newPlayers = players.map { player =>
       val cardsForPlayer = cards.slice((players.indexOf(player) + 0) * 9, (players.indexOf(player) + 1) * 9)
       val (handCards, closedTableCards) = cardsForPlayer.splitAt(6)
-      player.copy(handCards = handCards, closedTableCards = closedTableCards)
+      player.copy(handCards = handCards, closedTableCards = closedTableCards, turn = players.indexOf(player) == 0)
     }
 
     copy(players = newPlayers, deck = newDeck)
@@ -239,21 +240,21 @@ case class Game(id: String,
     this.copy(players = newPlayers)
   }
 
-  def doTurn(move: Move, player: Player): Option[Game] = {
+  def doTurn(move: Move, player: Player): Either[String, Game] = {
     val moveType = Move.moveType(move)
 
     if (isCorrectMoveForState(moveType) && player.turn) {
       val committedMove = moveType.commitMoveOnGame(this, move, player) match {
-        case (Some(game), true) =>
-          Some(game.nextPlayer)
-        case (Some(game), false) =>
-          Some(game)
-        case (None, _) =>
-          None
+        case (Right(game), true) =>
+          Right(game.nextPlayer)
+        case (Right(game), false) =>
+          Right(game)
+        case (Left(m), _) =>
+          Left(m)
       }
 
       committedMove match {
-        case Some(game) =>
+        case Right(game) =>
 
           // Commit after game commit things
 
@@ -272,11 +273,11 @@ case class Game(id: String,
 
           val newPassedState = Set(game.passedState, game.isInState.precedes).flatten
 
-          Some(game.copy(truncated = newTruncatedCards, table = newTableCards, passedState = newPassedState))
-        case _ => None
+          Right(game.copy(truncated = newTruncatedCards, table = newTableCards, passedState = newPassedState))
+        case Left(m) => Left(m)
       }
     } else {
-      None
+      Left("Dit is niet de correcte move voor deze state")
     }
   }
 }
@@ -290,10 +291,19 @@ object Game {
     val game = Game(
       id = id,
       deck = deck,
-      players = Seq(Player.newPlayer("Vlad", deck).copy(turn = true), Player.newPlayer("Freddie", deck), Player.newPlayer("Tomas", deck)),
-      table = Seq(),
-      truncated = Seq(),
-      lastUpdated = DateTime.now(), Set()).draw
+      players = Seq(Player.newPlayer("Vlad").copy(turn = true), Player.newPlayer("Freddie"), Player.newPlayer("Tomas"))).draw
+    gameCollection.insert(BSON.write(game))
+    game
+  }
+
+  def newGameWithUsers(users: Seq[User]): Game = {
+    val deck = Deck.newDeck
+    val id = java.util.UUID.randomUUID.toString
+    val game = Game(
+      id = id,
+      deck = deck,
+      players = users.map(user => Player.newPlayer(user.id))
+    ).draw
     gameCollection.insert(BSON.write(game))
     game
   }
@@ -308,6 +318,13 @@ object Game {
       .cursor[Game].collect[List]()
       .map(_.headOption)
   }
+
+  def getGamesForUser(user: User): Future[Seq[(Game, Seq[User])]] = gameCollection
+      .find(BSONDocument("players.id" -> user.id))
+      .cursor[Game]
+      .collect[Seq]().flatMap(games => Future.sequence(games.map { game =>
+        User.getUserByIds(game.players.map(_.id)).map(users => (game, users))
+      }))
 
   implicit val writesGamesJson: Writes[Game] = new Writes[Game] {
     override def writes(game: Game): JsValue = Json.obj(

@@ -26,7 +26,7 @@ object Move {
   }
 }
 
-sealed abstract class MoveType(val value: String, val commitMoveOnGame: (Game, Move, Player) => (Option[Game], MoveType.ToNextPlayer)) {
+sealed abstract class MoveType(val value: String, val commitMoveOnGame: (Game, Move, Player) => (Either[String, Game], MoveType.ToNextPlayer)) {
   def fromKV(kv: JsValue): Option[Move]
 }
 
@@ -45,8 +45,8 @@ object ThrowCardFromOpenTable extends MoveType("ThrowCardFromOpenTable", {(game,
       }
     }
 
-    (Some(game.copy(table = Seq(correctMove.cards, game.table).flatten, players = players.map(_._1))), true)
-  } else (None, false)
+    (Right(game.copy(table = Seq(correctMove.cards, game.table).flatten, players = players.map(_._1))), true)
+  } else (Left("Kan deze kaart niet opgooien!"), false)
 }) {
   override def fromKV(kv: JsValue): Option[ThrowCardFromOpenTableMove] = {
     val asArr = kv.asOpt[Seq[Card]]
@@ -86,11 +86,11 @@ object ThrowOnTable extends MoveType("ThrowOnTable", { (game, move, player) =>
 
   if (players.map(_._2).count(b => !b) == 0)
     if (game.canThrowOnTable(correctMove.cards)) {
-      (Some(game.copy(deck = newDeck, table = newTableCards, players = players.map(_._1))), !players.map(_._1).find(_.isEqual(player)).get.handCards.exists(_.rank.rank == correctMove.cards.head.rank.rank)) //correctMove.cards.head.rank.rankType != WillThrowAwayAllCards)
+      (Right(game.copy(deck = newDeck, table = newTableCards, players = players.map(_._1))), !players.map(_._1).find(_.isEqual(player)).get.handCards.exists(_.rank.rank == correctMove.cards.head.rank.rank)) //correctMove.cards.head.rank.rankType != WillThrowAwayAllCards)
     } else
-      (None, true)
+      (Left("Kan deze kaart niet op de tafel gooien!"), true)
   else
-    (None, true)
+    (Left("Niemand is aan zet?"), true)
 
 }) {
   def fromKV(kv: JsValue): Option[ThrowOnTableMove] = {
@@ -119,9 +119,9 @@ object ThrowCardFromClosedTable extends MoveType("ThrowCardFromClosedTable", { (
       } else p
     }
 
-    if (game.canThrowOnTable(Seq(card))) (Some(game.copy(table = Seq(Seq(card), game.table).flatten, players = players)), true)
+    if (game.canThrowOnTable(Seq(card))) (Right(game.copy(table = Seq(Seq(card), game.table).flatten, players = players)), true)
     else GrabFromTable.commitMoveOnGame(game.copy(table = Seq(Seq(card), game.table).flatten, players = players), GrabFromTableMove(), player)
-  } else (None, false)
+  } else (Left("Je kan geen gesloten kaart opgooien!"), false)
 }) {
   def fromKV(kv: JsValue): Option[ThrowCardFromClosedTableMove] = (kv \ "card").asOpt[Int].map(ThrowCardFromClosedTableMove(_))
 }
@@ -141,8 +141,8 @@ object ThrowToOwnClosed extends MoveType("ThrowToOwnClosed", {(game, move, playe
   }
 
   if (players.map(_._2).count(b => !b) == 0)
-    (Some(game.copy(players = players.map(_._1))), player.openedTableCards.size > 1)
-  else (None, false)
+    (Right(game.copy(players = players.map(_._1))), player.openedTableCards.size > 1)
+  else (Left("Niemand is aan de beurt?!"), false)
 }) {
   def fromKV(kv: JsValue): Option[ThrowToOwnClosedMove]= Card.fromKV(kv) match {
     case Some(card) => Some(ThrowToOwnClosedMove(card))
@@ -157,7 +157,7 @@ object GrabFromTable extends MoveType("GrabFromTable", {(game, _, player) =>
     } else p
   }
 
-  (Some(game.copy(players = players, table = Seq())), true)
+  (Right(game.copy(players = players, table = Seq())), true)
 }) {
   def fromKV(kv: JsValue): Option[GrabFromTableMove] = Some(GrabFromTableMove())
 }

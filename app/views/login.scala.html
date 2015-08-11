@@ -1,0 +1,8 @@
+@()
+
+@main("Drieën - Login") {
+  <form method="post" action="@controllers.routes.Application.login()">
+    Naam: <input type="text" name="name"><br>
+    <input type="submit" value="Submit">
+  </form>
+}

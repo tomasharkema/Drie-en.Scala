@@ -1,8 +1,9 @@
 @import _root_.game._
+@import _root_.user.User
 @import play.api.libs.json.Json
 @import _root_.helpers.JsonHelpers
 
-@(game: Game)
+@(game: Game, users: Seq[User], currentUser: User)
 
 @main("Drieën") {
 
@@ -15,41 +16,46 @@
     <table style="width: 100%"><tr>
     @game.players.map { player =>
       <td>
-      <h1>@player.id @if(player.turn) { : Aan zet }</h1>
+      <h1>@users.find(_.id == player.id).map(_.name) @if(player.turn) { : Aan zet }</h1>
       <p>Hand Kaarten:</p>
-      <ul>
-      @player.handCards.sortWith((a, b) => a.rank.rank < b.rank.rank).map { card =>
-        <li>
-        @card.string @if(player.turn) {
-          @if(game.validMovesForState.contains(ThrowOnTable)) {
-            <a href="@routes.GameController.commitMove(Some(true), game.id, player.id, ThrowOnTable.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">Gooi op tafel</a>
-          }
+        @if(player.id == currentUser.id) {
+          <ul>
+          @player.handCards.sortWith((a, b) => a.rank.rank < b.rank.rank).map { card =>
+            <li>
+              @card.string @if(player.turn) {
+              @if(game.validMovesForState.contains(ThrowOnTable) && player.id == currentUser.id) {
+                <a href="@routes.GameController.commitMove(Some(true), game.id, ThrowOnTable.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">
+                  Gooi op tafel</a>
+              }
 
-          @if(game.validMovesForState.contains(ThrowToOwnClosed)) {
-          <a href="@routes.GameController.commitMove(Some(true), game.id, player.id, ThrowToOwnClosed.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">Gooi op naar eigen stapel</a>
+              @if(game.validMovesForState.contains(ThrowToOwnClosed) && player.id == currentUser.id) {
+                <a href="@routes.GameController.commitMove(Some(true), game.id, ThrowToOwnClosed.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">
+                  Gooi op naar eigen stapel</a>
+              }
+            }
+            </li>
           }
+          </ul>
+        } else {
+          <p>Aantal kaarten: @player.handCards.size</p>
         }
-        </li>
-      }
-      </ul>
-      @game.validMovesForState.map { move =>
-        @*<a href="@routes.GameController.commitMove(Some(true), game.id, player.id, move.value, JsonHelpers.objToString(Json.arr(Json.obj("suit" -> player.handCards.head.suit.string, "rank" -> player.handCards.head.rank.abbr), Json.obj("suit" -> player.handCards(1).suit.string, "rank" -> player.handCards(1).rank.abbr))))">*@
-          @*1,2</a>*@
-      }
-        @if(player.turn) {<a href="@routes.GameController.commitMove(Some(true), game.id, player.id, GrabFromTable.value, "{}")">Ik kan niet</a>}
+
+        @if(player.turn && player.id == currentUser.id) {
+          <a href="@routes.GameController.commitMove(Some(true), game.id, GrabFromTable.value, "{}")">Ik kan niet</a>
+        }
 
 
         <p>Open Tafel Kaarten:</p>
       <ul>
       @player.openedTableCards.map { card =>
-        <li>@card.string @if(player.turn) { <a href="@routes.GameController.commitMove(Some(true), game.id, player.id, ThrowCardFromOpenTable.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">Gooi</a> }</li>
+        <li>@card.string @if(player.turn && player.id == currentUser.id) { <a href="@routes.GameController.commitMove(Some(true), game.id, ThrowCardFromOpenTable.value, JsonHelpers.objToString(Json.obj("suit" -> card.suit.string, "rank" -> card.rank.abbr)))">Gooi</a> }</li>
       }
       </ul>
 
-        @if(player.canThrowClosedCard && player.turn) {
+        @if(player.canThrowClosedCard && player.turn && player.id == currentUser.id) {
           <p>Gooi gesloten kaart:</p>
           @player.closedTableCards.map { card =>
-            <a href="@routes.GameController.commitMove(Some(true), game.id, player.id, ThrowCardFromClosedTable.value, JsonHelpers.objToString(Json.obj("card" -> player.closedTableCards.indexOf(card))))">DEZE? (@player.closedTableCards.indexOf(card))</a>
+            <a href="@routes.GameController.commitMove(Some(true), game.id, ThrowCardFromClosedTable.value, JsonHelpers.objToString(Json.obj("card" -> player.closedTableCards.indexOf(card))))">DEZE? (@player.closedTableCards.indexOf(card))</a>
           }
         }
 

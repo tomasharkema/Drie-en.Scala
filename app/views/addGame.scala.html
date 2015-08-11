@@ -1,0 +1,10 @@
+@()
+
+@main("Drieën - Voeg nieuwe game toe") {
+  <form method="post" action="@controllers.routes.GameController.addGamePost()">
+    Competitor1: <input type="text" name="user1"><br>
+      Competitor2: <input type="text" name="user2"><br>
+      Competitor3: <input type="text" name="user3"><br>
+    <input type="submit" value="Submit">
+  </form>
+}

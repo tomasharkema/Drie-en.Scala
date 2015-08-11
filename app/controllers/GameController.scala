@@ -1,42 +1,49 @@
 package controllers
 
+import controllers.Application._
 import game._
 import play.api._
 import play.api.mvc._
 import play.api.libs.json.Json
 import play.api.cache._
 import play.api.Play.current
+import reactivemongo.bson.BSONDocument
+import user.User
 import scala.concurrent.Future
+import security.Secured
 
 import scala.concurrent.ExecutionContext.Implicits.global
 
-object GameController extends Controller {
+object GameController extends Controller with Secured {
 
-  private def getByCacheOrFetch(id: String): Future[Option[Game]] = {
+  def fetchGameAndUser(game: Game): Future[Seq[User]] =
+    User.getUserByIds(game.players.map(_.id))
+
+  private def getByCacheOrFetch(id: String): Future[Option[(Game, Seq[User])]] = {
     Cache.getAs[Game]("gameuid:" + id) match {
       case Some(game: Game) =>
-        Future.apply(Some(game))
+
+        fetchGameAndUser(game).map(users => Some((game, users)))
       case None =>
-        Game.getByID(id).map {
+        Game.getByID(id).flatMap {
           case Some(game: Game) =>
-            Cache.set("gameuid:" + id, game)
-            Some(game)
-          case None =>
-            None
+            fetchGameAndUser(game).map(users => Some((game, users)))
+          case _ =>
+            Future(None)
         }
     }
   }
-  // http://localhost:5555/game/id/c87c87dc-f5de-46bc-b91d-e679bd99a63a
-  def game(gameId: String) = Action.async {
+
+  def game(gameId: String) = withUserFuture { (currentUser, token) => implicit request =>
     getByCacheOrFetch(gameId).map {
-      case Some(game) =>
-        Ok(views.html.game(game))
+      case Some((game, users)) =>
+        Ok(views.html.game(game, users, currentUser))
       case None =>
         NotFound
     }
   }
 
-  def newGame(redirect: Option[Boolean]) = Action {
+  def newGame(redirect: Option[Boolean] = None) = Action {
     val id = java.util.UUID.randomUUID.toString
     val game = Game.newGame(id)
     Cache.set("gameuid:" + id, game)
@@ -47,33 +54,59 @@ object GameController extends Controller {
     }
   }
 
-  def gameState(gameId: String) = Action.async {
+  def addNewGame = withUserFuture { (currentUser, token) => implicit request =>
+    Future(Ok(views.html.addGame()))
+  }
+
+  def addGamePost = withUserFuture { (currentUser, token) => implicit request =>
+
+    request.body.asFormUrlEncoded match {
+      case Some(map) =>
+
+        Future.sequence(Seq(map.get("user1").map(_(0)), map.get("user2").map(_(0)), map.get("user3").map(_(0)))
+          .filter(_.isDefined).map(_.get).filter(!_.equals(""))
+          .map { userName =>
+            User.getUserByName(userName)
+          }).map { users =>
+
+            if (users.exists(userExists => userExists.isEmpty || userExists.exists(_.id.equals(currentUser.id)))) {
+              // een user is niet gevonden, of hetzelfde als de user die hem aanmaakt.
+              Redirect(routes.GameController.addNewGame())
+            } else {
+              val game = Game.newGameWithUsers(Seq(users.map(_.get), Seq(currentUser)).flatten)
+              Redirect(routes.GameController.game(game.id))
+            }
+
+          }
+      case _ =>
+        Future(Redirect(routes.GameController.addNewGame()))
+    }
+  }
+
+  def gameState(gameId: String) = withUserFuture { (currentUser, token) => implicit request =>
     getByCacheOrFetch(gameId).map {
-      case Some(game) =>
+      case Some((game, users)) =>
         Ok(Json.toJson(game))
       case None =>
         NotFound
     }
   }
 
-  // http://localhost:5555/game/commitMove?gameId=c87c87dc-f5de-46bc-b91d-e679bd99a63a&playerId=A&move=ThrowToOwnClosed&kv=suit:R,rank:Q
-  // http://localhost:5555/game/commitMove?redirect=true&gameId=9b8aeb0e-9c0a-4bbf-a184-a4ecd71cb9c9&playerId=D&move=ThrowOnTable&kv=%5B%7B%22suit%22%3A%22R%22%2C%22rank%22%3A%229%22%7D%2C%7B%22suit%22%3A%22H%22%2C%22rank%22%3A%224%22%7D%5D
-
   private def toKV(kvString: String): Map[String, String] = kvString.split(",").toSeq.map(_.split(":").toSeq).map(s => s.head -> s(1)).toMap
 
-  def commitMove(redirect: Option[Boolean], gameId: String, playerId: String, moveString: String, kvString: String) = Action.async {
-    Logger.info(playerId + " doet " + moveString)
+  def commitMove(redirect: Option[Boolean], gameId: String, moveString: String, kvString: String) = withUserFuture { (currentUser, token) => implicit request =>
+    Logger.info(currentUser + " doet " + moveString)
 
     Game.getByID(gameId).map {
       case Some(game: Game) =>
 
         val res = for {
-          player <- game.players.find(_.id == playerId)
+          player <- game.players.find(_.id == currentUser.id)
           move <- MoveType.fromString(moveString).flatMap(_(Json.parse(kvString)))
         } yield game.doTurn(move, player)
 
         res match {
-          case Some(Some(game)) =>
+          case Some(Right(game)) =>
 
             Game.saveState(game)
             Cache.set("gameuid:" + game.id, game)
@@ -83,8 +116,8 @@ object GameController extends Controller {
               case _ => Ok(Json.toJson(game))
             }
 
-          case Some(None) =>
-            NotFound("No turn found")
+          case Some(Left(message)) =>
+            NotFound(message)
           case None =>
             NotFound("Player or move not found")
         }
