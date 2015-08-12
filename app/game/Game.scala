@@ -123,25 +123,32 @@ object Deck {
 }
 
 sealed abstract class GameState(val name: String, val isInState: Game => Boolean, val moves: Set[MoveType], val precedes: Set[GameState])
+
 case object Starting extends GameState("Starting", { game =>
   game.players.map(_.openedTableCards.size).exists(_ < 3) &&
     game.table.isEmpty &&
     !game.players.map(_.handCards.size).exists(_ > 6) &&
     game.truncated.size < 1
 }, Set(ThrowToOwnClosed), Set())
+
 case object FirstMover extends GameState("FirstMover", { game =>
   game.players.map(_.openedTableCards.size).count(_ == 3) == game.players.size &&
   game.table.isEmpty &&
   game.players.map(_.handCards).count(_ == 3) == game.players.size
 }, Set(ThrowOnTable), Set(Starting))
+
 case object NormalThrowing extends GameState("NormalThrowing", { game =>
   game.players.count(_.canDoAnotherTurn) == 2
 }, Set(ThrowOnTable, GrabFromTable, ThrowCardFromOpenTable, ThrowCardFromClosedTable), Set(FirstMover))
 
+case object Done extends GameState("Done", { game =>
+  game.players.count(_.canDoAnotherTurn) < 2
+}, Set(), Set(NormalThrowing))
+
 // for winnerstate: http://localhost:5555/game/id/a7647ee1-f5f1-4759-9a62-5a6196629147
 
 object GameState {
-  val States = Seq(Starting, FirstMover, NormalThrowing)
+  val States = Seq(Starting, FirstMover, NormalThrowing, Done)
 
   def fromString(string: String): Option[GameState] = {
     States.find(_.name == string)
@@ -181,8 +188,8 @@ case class Game(id: String,
     val validStates = GameState.States
       .filter(_.isInState(this))
       .filter(!passedState.contains(_))
-/// TODO: Finalizing state
-    validStates.headOption.getOrElse(NormalThrowing)
+
+    validStates.head
   }
 
   def validMovesForState: Set[MoveType] = {
