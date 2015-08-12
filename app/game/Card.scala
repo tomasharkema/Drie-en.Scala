@@ -74,19 +74,16 @@ case class Card(suit: Suit,
   }
 
   def comesAfter(otherCard: Card): Boolean = {
-    if (otherCard.rank.rankType == Joker ||
-      otherCard.rank.rankType == WillThrowAwayAllCards ||
-      otherCard.rank.rankType == StartAgain)
+    rank.rankType match {
+      case Normal =>
+        otherCard.rank.rank >= this.rank.rank
+      case StartAgain =>
+        otherCard.rank.rank >= this.rank.rank
+      case LowerThan =>
+        otherCard.rank.rank <= this.rank.rank
+      case _ =>
         true
-    else
-      this.rank.rankType match {
-        case Normal =>
-          otherCard.rank.rank >= this.rank.rank
-        case StartAgain =>
-          otherCard.rank.rank >= this.rank.rank
-        case LowerThan =>
-          otherCard.rank.rank <= this.rank.rank
-      }
+    }
   }
 }
 
