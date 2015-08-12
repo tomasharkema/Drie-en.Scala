@@ -18,7 +18,7 @@ object Connection {
 //    val userName = sys.env.getOrElse("PROD_MONGO_USER", "")
 //    val password = sys.env.getOrElse("PROD_MONGO_PASS", ""))
 //    val credentials = Seq(Authenticate(dbName, userName, password)
-    val connection = driver.connection(List(sys.env.getOrElse("PROD_MONGODB", "localhost")))//, authentications = credentials)
+    val connection = driver.connection(List(sys.env.getOrElse("MONGOLAB_URI", "localhost")))//, authentications = credentials)
 
     val db = connection(sys.env.getOrElse("PROD_MONGO_DB", "drieen"))
 

@@ -1,0 +1,9 @@
+language: scala
+scala:
+- 2.11.6
+services:
+- mongodb
+jdk:
+- oraclejdk8
+after_success:
+- sbt dist
