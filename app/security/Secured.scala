@@ -17,7 +17,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
 trait Secured {
   self: Controller =>
 
-  def token(request: RequestHeader) = request.session.get(Security.username)
+  def token(request: RequestHeader): Option[String] = request.session.get(Security.username) match {
+    case None =>
+      request.getQueryString("userToken")
+    case Some(s) => Some(s)
+  }
 
   def onUnauthorized(request: RequestHeader) = Results.Redirect(controllers.routes.Application.login)
   def onUnauthorizedFuture(request: RequestHeader) = Future.apply(onUnauthorized(request))
